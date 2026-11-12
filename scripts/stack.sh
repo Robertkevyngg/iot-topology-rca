@@ -45,10 +45,12 @@ case "${cmd}" in
 
     docker run -d --name iot-rca-redis --network "${NETWORK}" \
       -p 6379:6379 \
+      -v iot-rca-redis-data:/data \
       redis:7-alpine redis-server --appendonly yes >/dev/null
 
     docker run -d --name iot-rca-neo4j --network "${NETWORK}" \
       -p 7474:7474 -p 7687:7687 \
+      -v iot-rca-neo4j-data:/data \
       -e "NEO4J_AUTH=${NEO4J_USER}/${NEO4J_PASSWORD}" \
       -e "NEO4J_server_memory_heap_initial__size=256m" \
       -e "NEO4J_server_memory_heap_max__size=512m" \
@@ -79,7 +81,6 @@ case "${cmd}" in
       "${IMAGE}" python -m iot_rca.mqtt_ingester >/dev/null
 
     docker run -d --name iot-rca-simulator --network "${NETWORK}" \
-      -e "NEO4J_PASSWORD=${NEO4J_PASSWORD}" \
       -e "MQTT_HOST=iot-rca-mosquitto" \
       -e "MQTT_PORT=1883" \
       -e "SIMULATOR_INTERVAL_SECONDS=${SIMULATOR_INTERVAL_SECONDS:-2.0}" \

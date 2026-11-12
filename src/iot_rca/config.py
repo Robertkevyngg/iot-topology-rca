@@ -17,8 +17,24 @@ def _default_seed_path() -> Path:
     return Path("/app/topology/seed_topology.json")
 
 
+class SimulatorSettings(BaseSettings):
+    """Lightweight configuration for the MQTT simulator (no DB credentials required)."""
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        frozen=True,
+    )
+
+    mqtt_host: str = Field(default="localhost")
+    mqtt_port: int = Field(default=1883, ge=1, le=65535)
+    simulator_interval_seconds: float = Field(default=2.0, gt=0.2)
+    topology_seed_path: Path = Field(default_factory=_default_seed_path)
+
+
 class Settings(BaseSettings):
-    """Runtime configuration for API, ingester, RCA engine, and simulator."""
+    """Runtime configuration for API, ingester, and RCA engine."""
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -54,3 +70,9 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Return cached immutable application settings."""
     return Settings()
+
+
+@lru_cache(maxsize=1)
+def get_simulator_settings() -> SimulatorSettings:
+    """Return cached immutable simulator settings."""
+    return SimulatorSettings()

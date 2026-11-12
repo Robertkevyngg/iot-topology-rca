@@ -377,3 +377,48 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
+
+.node-details {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.76rem;
+}
+.node-details-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 600;
+}
+.node-details-meta,
+.node-details-metrics {
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+}
+
+.status-pill {
+  font-size: 0.68rem;
+  padding: 1px 7px;
+  border-radius: 999px;
+  text-transform: uppercase;
+  font-weight: 700;
+}
+.status-pill.online { background: #14532d; color: #bbf7d0; }
+.status-pill.offline { background: #7f1d1d; color: #fecaca; }
+.status-pill.unknown { background: #1e293b; color: #cbd5e1; }
+
+.history-card {
+  background: var(--panel-alt);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--online);
+  border-radius: 8px;
+  padding: 8px 11px;
+  font-size: 0.78rem;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}

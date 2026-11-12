@@ -2,6 +2,7 @@
 
 import json
 import time
+import uuid
 from datetime import UTC, datetime
 
 from redis.asyncio import Redis
@@ -21,6 +22,7 @@ _DEDUP_KEY_PREFIX = "iot:dedup:"
 _STATE_STREAM_KEY = "iot:stream:state_changes"
 _CHAOS_SCENARIO_KEY = "iot:chaos:scenario"
 _LIVE_PUBSUB_CHANNEL = "iot:pubsub:live"
+_RCA_LOCK_KEY = "iot:lock:rca_cycle"
 
 # Atomic pop of expired members from the ZSET so concurrent heartbeats are never lost.
 _POP_EXPIRED_LUA = """
@@ -30,6 +32,20 @@ if #expired > 0 then
 end
 return expired
 """
+
+# Atomic lock release only if the caller owns the lock token.
+_RELEASE_LOCK_LUA = """
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+    return redis.call('DEL', KEYS[1])
+end
+return 0
+"""
+
+
+def _decode_str(value: bytes | str | None) -> str | None:
+    if value is None:
+        return None
+    return value.decode("utf-8") if isinstance(value, bytes) else str(value)
 
 
 def _device_key(device_id: str) -> str:
@@ -46,6 +62,7 @@ class RedisStateStore:
     def __init__(self, client: Redis) -> None:
         self._redis = client
         self._pop_expired_script = self._redis.register_script(_POP_EXPIRED_LUA)
+        self._release_lock_script = self._redis.register_script(_RELEASE_LOCK_LUA)
 
     async def ping(self) -> bool:
         return bool(await self._redis.ping())
@@ -87,7 +104,7 @@ class RedisStateStore:
         now = now_epoch if now_epoch is not None else time.time()
         expiry_at = now + ttl_seconds
         dev_key = _device_key(payload.device_id)
-        prev_status = await self._redis.hget(dev_key, "status")
+        prev_status = _decode_str(await self._redis.hget(dev_key, "status"))
         transitioned = prev_status != DeviceStatus.ONLINE.value
 
         mapping: dict[str, str] = {
@@ -257,6 +274,49 @@ class RedisStateStore:
             return ChaosScenario(val)
         except ValueError:
             return ChaosScenario.HEALTHY
+
+    async def consume_state_events(
+        self,
+        *,
+        group_name: str = "rca_workers",
+        consumer_name: str = "worker-1",
+        count: int = 100,
+    ) -> list[dict[str, str]]:
+        """Read and acknowledge unconsumed state-change events via XREADGROUP."""
+        response = await self._redis.xreadgroup(
+            groupname=group_name,
+            consumername=consumer_name,
+            streams={_STATE_STREAM_KEY: ">"},
+            count=count,
+        )
+        if not response:
+            return []
+
+        ack_ids: list[bytes | str] = []
+        events: list[dict[str, str]] = []
+        for _stream_name, entries in response:
+            for entry_id, fields in entries:
+                ack_ids.append(entry_id)
+                decoded = {
+                    (_decode_str(k) or ""): (_decode_str(v) or "")
+                    for k, v in fields.items()
+                }
+                decoded["stream_id"] = _decode_str(entry_id) or ""
+                events.append(decoded)
+
+        if ack_ids:
+            await self._redis.xack(_STATE_STREAM_KEY, group_name, *ack_ids)
+        return events
+
+    async def acquire_rca_lock(self, ttl_seconds: int = 5) -> str | None:
+        """Acquire distributed RCA lock. Returns lock token if acquired, else None."""
+        token = uuid.uuid4().hex
+        acquired = await self._redis.set(_RCA_LOCK_KEY, token, ex=ttl_seconds, nx=True)
+        return token if acquired else None
+
+    async def release_rca_lock(self, token: str) -> None:
+        """Release distributed RCA lock only if held by `token`."""
+        await self._release_lock_script(keys=[_RCA_LOCK_KEY], args=[token])
 
     async def publish_live_update(self, payload: dict[str, object]) -> None:
         await self._redis.publish(_LIVE_PUBSUB_CHANNEL, json.dumps(payload))

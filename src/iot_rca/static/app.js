@@ -100,11 +100,12 @@ function renderTopologyGraph(snapshot) {
   const svg = document.getElementById("topology-svg");
   svg.replaceChildren();
 
+  const sensorCount = snapshot.nodes.filter((n) => n.node_type === "Sensor").length;
   const headers = [
     { x: 40, label: "Power Panels (Passive)" },
     { x: 270, label: "Network Switches" },
     { x: 510, label: "IoT Gateways" },
-    { x: 760, label: "Field Sensors (30)" },
+    { x: 760, label: `Field Sensors (${sensorCount})` },
   ];
   for (const h of headers) {
     svg.appendChild(svgEl("text", { x: h.x, y: 26, class: "col-header" }, h.label));
@@ -296,6 +297,7 @@ async function inspectBlastRadius(nodeId) {
     }
     panel.appendChild(tags);
 
+    renderNodeDetails(panel, nodeId);
     if (latestSnapshot) renderTopologyGraph(latestSnapshot);
   } catch (err) {
     console.error("Blast radius query failed", err);
@@ -310,12 +312,100 @@ async function setChaosScenario(scenario) {
   });
 }
 
+function renderNodeDetails(panel, nodeId) {
+  if (!latestSnapshot || !Array.isArray(latestSnapshot.nodes)) return;
+  const node = latestSnapshot.nodes.find((n) => n.id === nodeId);
+  if (!node) return;
+
+  const box = document.createElement("div");
+  box.className = "node-details";
+
+  const head = document.createElement("div");
+  head.className = "node-details-head";
+  const title = document.createElement("span");
+  title.textContent = node.zone_id ? `${node.node_type} · ${node.zone_id}` : node.node_type;
+  const pill = document.createElement("span");
+  pill.className = `status-pill ${node.status}`;
+  pill.textContent = node.status;
+  head.append(title, pill);
+  box.appendChild(head);
+
+  const meta = document.createElement("div");
+  meta.className = "node-details-meta";
+  const parts = [];
+  if (node.criticality) parts.push(`Criticality: ${node.criticality}`);
+  if (node.is_passive) parts.push("Passive infrastructure");
+  if (node.battery_pct !== null && node.battery_pct !== undefined) {
+    parts.push(`Battery: ${node.battery_pct}%`);
+  }
+  if (node.last_seen) {
+    parts.push(`Last seen: ${new Date(node.last_seen).toLocaleTimeString()}`);
+  }
+  if (parts.length > 0) {
+    meta.textContent = parts.join(" | ");
+    box.appendChild(meta);
+  }
+
+  const metricEntries = node.metrics ? Object.entries(node.metrics) : [];
+  if (metricEntries.length > 0) {
+    const metricsRow = document.createElement("div");
+    metricsRow.className = "node-details-metrics";
+    metricsRow.textContent = `Telemetry: ${metricEntries.map(([k, v]) => `${k}=${v}`).join(", ")}`;
+    box.appendChild(metricsRow);
+  }
+
+  panel.appendChild(box);
+}
+
+async function refreshResolvedIncidents() {
+  const list = document.getElementById("resolved-list");
+  if (!list) return;
+  try {
+    const res = await fetch("/api/v1/incidents?status=RESOLVED&limit=8");
+    const items = await res.json();
+    list.replaceChildren();
+    if (!items.length) {
+      list.className = "scroll-list empty-state";
+      list.textContent = "No resolved incidents yet.";
+      return;
+    }
+    list.className = "scroll-list";
+    for (const inc of items) {
+      const card = document.createElement("div");
+      card.className = "history-card";
+
+      const top = document.createElement("div");
+      top.className = "incident-top";
+      const title = document.createElement("span");
+      title.textContent = `${inc.root_cause_name} (${inc.root_cause_type})`;
+      const badge = document.createElement("span");
+      badge.className = "badge low";
+      badge.textContent = "RESOLVED";
+      top.append(title, badge);
+
+      const summary = document.createElement("div");
+      summary.textContent = inc.summary;
+
+      const meta = document.createElement("div");
+      meta.className = "mono-tag";
+      const resolvedAt = inc.resolved_at ? new Date(inc.resolved_at).toLocaleTimeString() : "-";
+      meta.textContent = `Resolved: ${resolvedAt} | Suppressed: ${inc.suppressed_alerts_count}`;
+
+      card.append(top, summary, meta);
+      list.appendChild(card);
+    }
+  } catch (err) {
+    console.error("Failed to fetch resolved incidents", err);
+  }
+}
+
 function applySnapshot(snapshot) {
   latestSnapshot = snapshot;
   renderKpis(snapshot);
   renderIncidents(snapshot.open_incidents);
   renderTopologyGraph(snapshot);
   refreshStreamEvents();
+  refreshResolvedIncidents();
 }
 
 function connectWebSocket() {

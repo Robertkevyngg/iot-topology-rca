@@ -31,9 +31,55 @@ from iot_rca.mqtt_ingester import load_topology_seed, run_rca_cycle
 from iot_rca.neo4j_repo import Neo4jTopologyRepo
 from iot_rca.redis_store import RedisStateStore
 from iot_rca.simulator import CHAOS_COMMAND_TOPIC
+from iot_rca.startup import wait_for_stores
 
 logger = logging.getLogger(__name__)
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+
+
+class MqttChaosPublisher:
+    """Reuses an MQTT connection across chaos commands, reconnecting on drop."""
+
+    def __init__(self, host: str, port: int) -> None:
+        self._host = host
+        self._port = port
+        self._lock = asyncio.Lock()
+        self._client: aiomqtt.Client | None = None
+
+    async def publish(self, scenario: ChaosScenario) -> None:
+        payload = json.dumps({"scenario": scenario.value})
+        async with self._lock:
+            for attempt in range(2):
+                if self._client is None:
+                    client = aiomqtt.Client(
+                        hostname=self._host,
+                        port=self._port,
+                        identifier="iot-rca-api-chaos",
+                    )
+                    await client.__aenter__()
+                    self._client = client
+                try:
+                    await self._client.publish(
+                        CHAOS_COMMAND_TOPIC,
+                        payload,
+                        qos=1,
+                        retain=True,
+                    )
+                    return
+                except Exception:
+                    await self._close_unlocked()
+                    if attempt == 1:
+                        raise
+
+    async def _close_unlocked(self) -> None:
+        if self._client is not None:
+            with suppress(Exception):
+                await self._client.__aexit__(None, None, None)
+            self._client = None
+
+    async def close(self) -> None:
+        async with self._lock:
+            await self._close_unlocked()
 
 
 class ChaosCommandRequest(BaseModel):
@@ -154,25 +200,25 @@ def create_app(
         neo4j_repo = Neo4jTopologyRepo(n_driver)
 
         if owns_clients:
-            for attempt in range(1, 21):
-                try:
-                    if await redis_store.ping() and await neo4j_repo.ping():
-                        break
-                except Exception as exc:
-                    logger.info("API waiting for Redis/Neo4j (%d/20): %s", attempt, exc)
-                    await asyncio.sleep(2.0)
-
+            await wait_for_stores(redis_store, neo4j_repo, service_name="api")
             seed = load_topology_seed(app_settings.topology_seed_path)
             await neo4j_repo.ensure_schema_and_seed(seed)
+
+        chaos_publisher = MqttChaosPublisher(
+            app_settings.mqtt_host,
+            app_settings.mqtt_port,
+        )
 
         app.state.settings = app_settings
         app.state.redis_store = redis_store
         app.state.neo4j_repo = neo4j_repo
         app.state.redis_client = r_client
+        app.state.chaos_publisher = chaos_publisher
 
         try:
             yield
         finally:
+            await chaos_publisher.close()
             if owns_clients:
                 await n_driver.close()
                 await r_client.aclose()
@@ -236,17 +282,7 @@ def create_app(
     async def set_chaos_scenario(body: ChaosCommandRequest) -> ChaosCommandResponse:
         await app.state.redis_store.set_active_chaos_scenario(body.scenario)
         try:
-            async with aiomqtt.Client(
-                hostname=app.state.settings.mqtt_host,
-                port=app.state.settings.mqtt_port,
-                identifier="iot-rca-api-chaos",
-            ) as client:
-                await client.publish(
-                    CHAOS_COMMAND_TOPIC,
-                    json.dumps({"scenario": body.scenario.value}),
-                    qos=1,
-                    retain=True,
-                )
+            await app.state.chaos_publisher.publish(body.scenario)
         except Exception as exc:
             raise HTTPException(
                 status_code=502,

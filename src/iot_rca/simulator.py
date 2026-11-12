@@ -4,11 +4,12 @@ import asyncio
 import json
 import logging
 import random
+import time
 from datetime import UTC, datetime
 
 import aiomqtt
 
-from iot_rca.config import Settings, get_settings
+from iot_rca.config import Settings, SimulatorSettings, get_simulator_settings
 from iot_rca.models import ChaosScenario, NodeType, TelemetryPayload, TopologySeed
 from iot_rca.mqtt_ingester import load_topology_seed
 
@@ -73,13 +74,14 @@ def build_sensor_metrics(sensor_type: str, rng: random.Random) -> dict[str, floa
 class FleetSimulator:
     """Publishes realistic heartbeats for all active infrastructure and sensors over MQTT."""
 
-    def __init__(self, settings: Settings, seed: TopologySeed) -> None:
+    def __init__(self, settings: Settings | SimulatorSettings, seed: TopologySeed) -> None:
         self._settings = settings
         self._seed = seed
         self._scenario = ChaosScenario.HEALTHY
         self._muted: frozenset[str] = frozenset()
+        self._seq_base = time.time_ns() // 1_000_000
         self._seq_counters: dict[str, int] = {}
-        self._rng = random.Random(42)
+        self._rng = random.Random()
 
     def set_scenario(self, scenario: ChaosScenario) -> None:
         self._scenario = scenario
@@ -91,7 +93,7 @@ class FleetSimulator:
         )
 
     def _next_seq(self, device_id: str) -> int:
-        seq = self._seq_counters.get(device_id, 0) + 1
+        seq = self._seq_counters.get(device_id, self._seq_base) + 1
         self._seq_counters[device_id] = seq
         return seq
 
@@ -195,7 +197,7 @@ async def main() -> None:
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
-    settings = get_settings()
+    settings = get_simulator_settings()
     seed = load_topology_seed(settings.topology_seed_path)
     sim = FleetSimulator(settings, seed)
     await sim.run()

@@ -9,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from iot_rca.api import build_topology_snapshot, create_app
-from iot_rca.config import Settings
+from iot_rca.config import Settings, SimulatorSettings
 from iot_rca.models import (
     CandidateExplanation,
     ChaosScenario,
@@ -18,11 +18,14 @@ from iot_rca.models import (
     DeviceStatus,
     NodeType,
     StoredIncident,
+    TelemetryPayload,
     TopologyEdgeView,
 )
 from iot_rca.mqtt_ingester import MqttIngesterService
 from iot_rca.rca_engine import correlate_failures
+from iot_rca.redis_store import RedisStateStore
 from iot_rca.simulator import FleetSimulator, build_sensor_metrics
+from iot_rca.startup import wait_for_stores
 
 
 def test_correlate_failures_handles_orphan_devices_not_in_candidates() -> None:
@@ -202,15 +205,15 @@ def test_api_incidents_and_events_endpoints() -> None:
         app.state.redis_store.set_active_chaos_scenario = AsyncMock()
         app.state.redis_store.publish_live_update = AsyncMock()
         mock_mqtt_client = AsyncMock()
-        mock_cm = MagicMock()
-        mock_cm.__aenter__ = AsyncMock(return_value=mock_mqtt_client)
-        mock_cm.__aexit__ = AsyncMock(return_value=None)
-        with patch("iot_rca.api.aiomqtt.Client", return_value=mock_cm):
+        mock_mqtt_client.__aenter__ = AsyncMock(return_value=mock_mqtt_client)
+        mock_mqtt_client.__aexit__ = AsyncMock(return_value=None)
+        with patch("iot_rca.api.aiomqtt.Client", return_value=mock_mqtt_client):
             chaos_res = client.post("/api/v1/chaos", json={"scenario": "gateway_failure"})
         assert chaos_res.status_code == 200
         assert chaos_res.json()["scenario"] == "gateway_failure"
         mock_mqtt_client.publish.assert_awaited_once()
 
+        mock_mqtt_client.publish.side_effect = OSError("broken pipe")
         failing_cm = MagicMock()
         failing_cm.__aenter__ = AsyncMock(side_effect=OSError("broker down"))
         failing_cm.__aexit__ = AsyncMock(return_value=None)
@@ -255,4 +258,125 @@ async def test_simulator_publish_cycle_and_command_handling() -> None:
     cmd_client.messages = _fake_messages()
     await sim._listen_commands(cmd_client)
     assert sim._scenario == ChaosScenario.SWITCH_FAILURE
+
+
+def test_simulator_settings_loads_without_neo4j_password(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("NEO4J_PASSWORD", raising=False)
+    sim_settings = SimulatorSettings()
+    assert sim_settings.mqtt_host == "localhost"
+    assert sim_settings.mqtt_port == 1883
+
+
+@pytest.mark.asyncio
+async def test_wait_for_stores_succeeds_and_raises_on_timeout() -> None:
+    redis_store = MagicMock()
+    neo4j_repo = MagicMock()
+    redis_store.ping = AsyncMock(side_effect=[False, True])
+    neo4j_repo.ping = AsyncMock(side_effect=[True])
+
+    await wait_for_stores(
+        redis_store,
+        neo4j_repo,
+        service_name="test-svc",
+        max_attempts=3,
+        delay_seconds=0.0,
+    )
+    assert redis_store.ping.await_count == 2
+    assert neo4j_repo.ping.await_count == 1
+
+    redis_store.ping = AsyncMock(return_value=False)
+    neo4j_repo.ping = AsyncMock(return_value=True)
+    with pytest.raises(RuntimeError, match="test-svc timed out"):
+        await wait_for_stores(
+            redis_store,
+            neo4j_repo,
+            service_name="test-svc",
+            max_attempts=2,
+            delay_seconds=0.0,
+        )
+
+
+@pytest.mark.asyncio
+async def test_record_heartbeat_skips_duplicate_online_stream_event() -> None:
+    pipe = MagicMock()
+    pipe.__aenter__ = AsyncMock(return_value=pipe)
+    pipe.__aexit__ = AsyncMock(return_value=None)
+    pipe.hset = MagicMock()
+    pipe.zadd = MagicMock()
+    pipe.xadd = MagicMock()
+    pipe.execute = AsyncMock(return_value=[])
+
+    mock_redis = AsyncMock()
+    mock_redis.register_script = MagicMock()
+    mock_redis.set = AsyncMock(return_value=True)
+    mock_redis.hget = AsyncMock(return_value=b"online")
+    mock_redis.pipeline = MagicMock(return_value=pipe)
+
+    store = RedisStateStore(mock_redis)
+    payload_repeat = TelemetryPayload(
+        device_id="sns-temp-01",
+        device_type=NodeType.SENSOR,
+        seq=1,
+        battery_pct=98.0,
+        metrics={"temp_c": 22.1},
+    )
+    accepted, transitioned = await store.record_heartbeat(
+        payload_repeat,
+        ttl_seconds=8.0,
+        now_epoch=1000.0,
+    )
+    assert accepted is True
+    assert transitioned is False
+    assert pipe.xadd.call_count == 0
+
+    mock_redis.hget = AsyncMock(return_value=b"offline")
+    payload_recover = TelemetryPayload(
+        device_id="sns-temp-01",
+        device_type=NodeType.SENSOR,
+        seq=2,
+        battery_pct=98.0,
+        metrics={"temp_c": 22.2},
+    )
+    accepted2, transitioned2 = await store.record_heartbeat(
+        payload_recover,
+        ttl_seconds=8.0,
+        now_epoch=1003.0,
+    )
+    assert accepted2 is True
+    assert transitioned2 is True
+    assert pipe.xadd.call_count == 1
+
+
+def test_api_websocket_live_receives_initial_snapshot() -> None:
+    async def _fake_listen():
+        yield {"type": "message", "data": b'{"event": "rca_updated"}'}
+        await asyncio.Event().wait()
+
+    settings = Settings(neo4j_password="test-password")
+    mock_pubsub = AsyncMock()
+    mock_pubsub.listen = _fake_listen
+    mock_redis = AsyncMock()
+    mock_redis.register_script = MagicMock()
+    mock_redis.pubsub = MagicMock(return_value=mock_pubsub)
+
+    app = create_app(
+        settings=settings,
+        redis_client=mock_redis,
+        neo4j_driver=AsyncMock(),
+    )
+    with TestClient(app) as client:
+        app.state.neo4j_repo.fetch_graph_structure = AsyncMock(return_value=([], []))
+        app.state.neo4j_repo.list_incidents = AsyncMock(return_value=[])
+        app.state.redis_store.get_all_device_states = AsyncMock(return_value={})
+        app.state.redis_store.get_active_chaos_scenario = AsyncMock(
+            return_value=ChaosScenario.HEALTHY
+        )
+
+        with client.websocket_connect("/ws/live") as ws:
+            snapshot = ws.receive_json()
+            pushed = ws.receive_json()
+        assert snapshot["active_scenario"] == "healthy"
+        assert snapshot["nodes"] == []
+        assert "stats" in snapshot
+        assert pushed["active_scenario"] == "healthy"
 

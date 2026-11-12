@@ -175,6 +175,27 @@ async def test_full_redis_neo4j_rca_escalation_and_recovery_lifecycle() -> None:
         stream_events = await redis_store.get_recent_state_events(count=50)
         assert len(stream_events) > 0
 
+        consumed_events = await redis_store.consume_state_events(
+            consumer_name="test-worker-1",
+            count=200,
+        )
+        assert len(consumed_events) > 0
+        assert (
+            await redis_store.consume_state_events(
+                consumer_name="test-worker-1",
+                count=200,
+            )
+            == []
+        )
+
+        lock_token = await redis_store.acquire_rca_lock(ttl_seconds=5)
+        assert lock_token is not None
+        assert await redis_store.acquire_rca_lock(ttl_seconds=5) is None
+        await redis_store.release_rca_lock(lock_token)
+        reacquired = await redis_store.acquire_rca_lock(ttl_seconds=5)
+        assert reacquired is not None
+        await redis_store.release_rca_lock(reacquired)
+
         await redis_store.set_active_chaos_scenario(ChaosScenario.POWER_PANEL_FAILURE)
         assert await redis_store.get_active_chaos_scenario() == ChaosScenario.POWER_PANEL_FAILURE
         await redis_store.set_active_chaos_scenario(ChaosScenario.HEALTHY)

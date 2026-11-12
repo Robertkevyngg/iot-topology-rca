@@ -1,5 +1,8 @@
 # IoT Topology RCA — Fault Correlation with Redis & Neo4j
 
+[![CI](https://github.com/Robertkevyngg/iot-topology-rca/actions/workflows/ci.yml/badge.svg)](https://github.com/Robertkevyngg/iot-topology-rca/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 A production-style **IoT observability and Root Cause Analysis (RCA)** platform that combines **Redis** (low-latency heartbeat tracking) and **Neo4j** (infrastructure dependency graph) to eliminate alert storms and pinpoint root causes in real time.
 
 Instead of firing 20+ redundant alerts when a gateway, switch, or passive power panel fails, the engine correlates live offline states with the physical/network topology and collapses the cascade into **one actionable root-cause incident**.

@@ -3,6 +3,8 @@
 import asyncio
 import json
 import logging
+import os
+import socket
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -16,6 +18,7 @@ from iot_rca.models import RcaEvaluation, TelemetryPayload, TopologySeed
 from iot_rca.neo4j_repo import Neo4jTopologyRepo
 from iot_rca.rca_engine import correlate_failures
 from iot_rca.redis_store import RedisStateStore
+from iot_rca.startup import wait_for_stores
 
 logger = logging.getLogger(__name__)
 
@@ -80,11 +83,14 @@ class MqttIngesterService:
         settings: Settings,
         redis_store: RedisStateStore,
         neo4j_repo: Neo4jTopologyRepo,
+        *,
+        consumer_name: str | None = None,
     ) -> None:
         self._settings = settings
         self._redis = redis_store
         self._neo4j = neo4j_repo
         self._dirty_event = asyncio.Event()
+        self._consumer_name = consumer_name or f"{socket.gethostname()}-{os.getpid()}"
 
     async def handle_raw_message(self, raw_payload: bytes | str) -> bool:
         """Validate and persist a single telemetry payload. Returns True if accepted."""
@@ -130,7 +136,7 @@ class MqttIngesterService:
                 await asyncio.sleep(2.0)
 
     async def expiry_and_rca_loop(self, stop_event: asyncio.Event) -> None:
-        """Sweep expired device heartbeats and run Neo4j RCA on state transitions."""
+        """Sweep expired device heartbeats, consume stream events, and run Neo4j RCA."""
         last_rca_ts = 0.0
         loop = asyncio.get_running_loop()
 
@@ -139,6 +145,11 @@ class MqttIngesterService:
                 expired = await self._redis.sweep_expired_heartbeats()
                 if expired:
                     logger.info("Expired %d overdue devices: %s", len(expired), expired)
+
+                stream_events = await self._redis.consume_state_events(
+                    consumer_name=self._consumer_name
+                )
+                if stream_events:
                     self._dirty_event.set()
 
                 now = loop.time()
@@ -146,9 +157,14 @@ class MqttIngesterService:
                     now - last_rca_ts >= self._settings.rca_interval_seconds * 2
                 )
                 if should_run_rca:
-                    self._dirty_event.clear()
-                    await run_rca_cycle(self._redis, self._neo4j, self._settings)
-                    last_rca_ts = now
+                    token = await self._redis.acquire_rca_lock(ttl_seconds=10)
+                    if token is not None:
+                        try:
+                            self._dirty_event.clear()
+                            await run_rca_cycle(self._redis, self._neo4j, self._settings)
+                            last_rca_ts = now
+                        finally:
+                            await self._redis.release_rca_lock(token)
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -188,14 +204,7 @@ async def main() -> None:
 
     try:
         seed = load_topology_seed(settings.topology_seed_path)
-        for attempt in range(1, 21):
-            try:
-                if await redis_store.ping() and await neo4j_repo.ping():
-                    break
-            except Exception as exc:
-                logger.info("Waiting for Redis/Neo4j (%d/20): %s", attempt, exc)
-                await asyncio.sleep(2.0)
-
+        await wait_for_stores(redis_store, neo4j_repo, service_name="ingester")
         await neo4j_repo.ensure_schema_and_seed(seed)
         service = MqttIngesterService(settings, redis_store, neo4j_repo)
         await service.run()
