@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>IoT Topology RCA — Redis + Neo4j</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-title">IoT Topology RCA</div>
+      <div class="brand-sub">Neo4j Dependency Graph + Redis Heartbeat Correlation</div>
+    </div>
+    <div class="chaos-controls">
+      <span class="control-label">Chaos Fault Injection:</span>
+      <button class="btn btn-healthy" data-scenario="healthy">Healthy Fleet</button>
+      <button class="btn btn-warn" data-scenario="single_sensor">1 Sensor Fault</button>
+      <button class="btn btn-orange" data-scenario="gateway_failure">Gateway Down</button>
+      <button class="btn btn-danger" data-scenario="switch_failure">Switch Down</button>
+      <button class="btn btn-critical" data-scenario="power_panel_failure">Power Panel Outage</button>
+      <a class="btn btn-ghost" href="/docs" target="_blank" rel="noopener">API Docs</a>
+    </div>
+    <div class="live-badge" id="ws-status">
+      <span class="dot"></span>
+      <span id="ws-status-text">Connecting...</span>
+    </div>
+  </header>
+
+  <section class="kpi-grid">
+    <article class="kpi-card">
+      <div class="kpi-label">Active Devices Online</div>
+      <div class="kpi-value" id="kpi-online">-- / --</div>
+      <div class="kpi-sub" id="kpi-sensors">Sensors: --</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-label">Open Root-Cause Incidents</div>
+      <div class="kpi-value" id="kpi-incidents">0</div>
+      <div class="kpi-sub" id="kpi-raw">Equivalent raw alerts: 0</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-label">Suppressed Redundant Alerts</div>
+      <div class="kpi-value" id="kpi-suppressed">0</div>
+      <div class="kpi-sub">Collapsed via Neo4j topology</div>
+    </article>
+    <article class="kpi-card highlight">
+      <div class="kpi-label">Alert Noise Reduction</div>
+      <div class="kpi-value" id="kpi-noise">0%</div>
+      <div class="kpi-sub" id="kpi-scenario">Scenario: healthy</div>
+    </article>
+  </section>
+
+  <main class="workspace">
+    <section class="panel graph-panel">
+      <div class="panel-header">
+        <div>
+          <h2>Infrastructure &amp; Sensor Topology</h2>
+          <p class="panel-hint">Click any node to inspect its downstream Blast Radius on the Neo4j graph.</p>
+        </div>
+        <div class="legend">
+          <span class="legend-item"><i class="swatch online"></i>Online</span>
+          <span class="legend-item"><i class="swatch offline"></i>Offline</span>
+          <span class="legend-item"><i class="swatch root-cause"></i>Root Cause</span>
+          <span class="legend-item"><i class="swatch blast"></i>Blast Radius</span>
+        </div>
+      </div>
+      <div class="graph-container">
+        <svg id="topology-svg" viewBox="0 0 1120 760" preserveAspectRatio="xMidYMid meet"></svg>
+      </div>
+    </section>
+
+    <aside class="sidebar">
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Active Root-Cause Incidents</h2>
+          <button class="btn btn-small" id="btn-evaluate">Re-Evaluate</button>
+        </div>
+        <div id="incidents-list" class="scroll-list empty-state">No open incidents — fleet healthy.</div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Blast Radius Inspector</h2>
+          <button class="btn btn-small btn-ghost" id="btn-clear-blast">Clear</button>
+        </div>
+        <div id="blast-panel" class="blast-box empty-state">
+          Click any PowerPanel, Switch, or Gateway node to trace downstream impact.
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Redis State Stream</h2>
+          <span class="mono-tag">iot:stream:state_changes</span>
+        </div>
+        <div id="stream-list" class="scroll-list stream-list">Loading stream...</div>
+      </section>
+    </aside>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Environment
+.env
+*.local
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
+
+# Docker volumes
+data/
+mosquitto/data/
+mosquitto/log/

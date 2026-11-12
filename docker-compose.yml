@@ -1,0 +1,99 @@
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: iot-rca-mosquitto
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_sub -t '$$SYS/broker/uptime' -C 1 -W 3 >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: iot-rca-redis
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  neo4j:
+    image: neo4j:5-community
+    container_name: iot-rca-neo4j
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    environment:
+      NEO4J_AUTH: "${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-iot_topo_local_dev}"
+      NEO4J_server_memory_heap_initial__size: "256m"
+      NEO4J_server_memory_heap_max__size: "512m"
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u ${NEO4J_USER:-neo4j} -p ${NEO4J_PASSWORD:-iot_topo_local_dev} 'RETURN 1' >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+
+  api:
+    build: .
+    container_name: iot-rca-api
+    command: ["python", "-m", "iot_rca.api"]
+    ports:
+      - "8000:8000"
+    environment:
+      REDIS_URL: "redis://redis:6379/0"
+      NEO4J_URI: "bolt://neo4j:7687"
+      NEO4J_USER: "${NEO4J_USER:-neo4j}"
+      NEO4J_PASSWORD: "${NEO4J_PASSWORD:-iot_topo_local_dev}"
+      MQTT_HOST: "mosquitto"
+      MQTT_PORT: "1883"
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+
+  ingester:
+    build: .
+    container_name: iot-rca-ingester
+    command: ["python", "-m", "iot_rca.mqtt_ingester"]
+    environment:
+      REDIS_URL: "redis://redis:6379/0"
+      NEO4J_URI: "bolt://neo4j:7687"
+      NEO4J_USER: "${NEO4J_USER:-neo4j}"
+      NEO4J_PASSWORD: "${NEO4J_PASSWORD:-iot_topo_local_dev}"
+      MQTT_HOST: "mosquitto"
+      MQTT_PORT: "1883"
+      HEARTBEAT_TTL_SECONDS: "${HEARTBEAT_TTL_SECONDS:-8}"
+      EXPIRY_SWEEP_INTERVAL_SECONDS: "${EXPIRY_SWEEP_INTERVAL_SECONDS:-1.0}"
+      RCA_INTERVAL_SECONDS: "${RCA_INTERVAL_SECONDS:-1.5}"
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+
+  simulator:
+    build: .
+    container_name: iot-rca-simulator
+    command: ["python", "-m", "iot_rca.simulator"]
+    environment:
+      NEO4J_PASSWORD: "${NEO4J_PASSWORD:-iot_topo_local_dev}"
+      MQTT_HOST: "mosquitto"
+      MQTT_PORT: "1883"
+      SIMULATOR_INTERVAL_SECONDS: "${SIMULATOR_INTERVAL_SECONDS:-2.0}"
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+      ingester:
+        condition: service_started

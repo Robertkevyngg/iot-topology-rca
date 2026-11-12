@@ -1,0 +1,116 @@
+{
+  "zones": [
+    { "id": "zone-assembly-a", "name": "Assembly Line A", "floor": "1F" },
+    { "id": "zone-cold-vault", "name": "Cold Storage Vault", "floor": "1F" },
+    { "id": "zone-packaging", "name": "Packaging & Robotics", "floor": "2F" },
+    { "id": "zone-utilities", "name": "Utilities & Substation", "floor": "B1" }
+  ],
+  "power_panels": [
+    {
+      "id": "pp-main-a",
+      "name": "Main Panel A (North Wing)",
+      "circuit": "BUS-NORTH-480V",
+      "zone_id": "zone-utilities"
+    },
+    {
+      "id": "pp-main-b",
+      "name": "Main Panel B (South Wing)",
+      "circuit": "BUS-SOUTH-480V",
+      "zone_id": "zone-utilities"
+    }
+  ],
+  "switches": [
+    {
+      "id": "sw-core-01",
+      "name": "Industrial Switch 01",
+      "ip": "10.20.1.10",
+      "powered_by": "pp-main-a",
+      "zone_id": "zone-assembly-a"
+    },
+    {
+      "id": "sw-core-02",
+      "name": "Industrial Switch 02",
+      "ip": "10.20.2.10",
+      "powered_by": "pp-main-b",
+      "zone_id": "zone-packaging"
+    }
+  ],
+  "gateways": [
+    {
+      "id": "gw-lora-01",
+      "name": "LoRaWAN Gateway North",
+      "protocol": "LoRaWAN",
+      "powered_by": "pp-main-a",
+      "uplink_via": "sw-core-01",
+      "zone_id": "zone-assembly-a"
+    },
+    {
+      "id": "gw-modbus-01",
+      "name": "Modbus TCP Concentrator",
+      "protocol": "Modbus-TCP",
+      "powered_by": "pp-main-a",
+      "uplink_via": "sw-core-01",
+      "zone_id": "zone-assembly-a"
+    },
+    {
+      "id": "gw-lte-01",
+      "name": "Cold Vault Cellular Gateway",
+      "protocol": "LTE-CatM1",
+      "powered_by": "pp-main-a",
+      "uplink_via": null,
+      "zone_id": "zone-cold-vault"
+    },
+    {
+      "id": "gw-zigbee-01",
+      "name": "Zigbee Mesh Coordinator",
+      "protocol": "Zigbee-3.0",
+      "powered_by": "pp-main-b",
+      "uplink_via": "sw-core-02",
+      "zone_id": "zone-packaging"
+    },
+    {
+      "id": "gw-opcua-01",
+      "name": "OPC-UA Edge Bridge",
+      "protocol": "OPC-UA",
+      "powered_by": "pp-main-b",
+      "uplink_via": "sw-core-02",
+      "zone_id": "zone-packaging"
+    }
+  ],
+  "sensors": [
+    { "id": "sns-temp-01", "sensor_type": "temperature", "criticality": "high", "firmware": "2.4.1", "gateway_id": "gw-lora-01", "zone_id": "zone-assembly-a" },
+    { "id": "sns-temp-02", "sensor_type": "temperature", "criticality": "medium", "firmware": "2.4.1", "gateway_id": "gw-lora-01", "zone_id": "zone-assembly-a" },
+    { "id": "sns-temp-03", "sensor_type": "temperature", "criticality": "medium", "firmware": "2.4.1", "gateway_id": "gw-lora-01", "zone_id": "zone-assembly-a" },
+    { "id": "sns-temp-04", "sensor_type": "temperature", "criticality": "low", "firmware": "2.4.0", "gateway_id": "gw-lora-01", "zone_id": "zone-assembly-a" },
+    { "id": "sns-hum-01", "sensor_type": "humidity", "criticality": "medium", "firmware": "1.9.2", "gateway_id": "gw-lora-01", "zone_id": "zone-assembly-a" },
+    { "id": "sns-hum-02", "sensor_type": "humidity", "criticality": "low", "firmware": "1.9.2", "gateway_id": "gw-lora-01", "zone_id": "zone-assembly-a" },
+    { "id": "sns-hum-03", "sensor_type": "humidity", "criticality": "low", "firmware": "1.9.2", "gateway_id": "gw-lora-01", "zone_id": "zone-assembly-a" },
+    { "id": "sns-hum-04", "sensor_type": "humidity", "criticality": "low", "firmware": "1.9.2", "gateway_id": "gw-lora-01", "zone_id": "zone-assembly-a" },
+
+    { "id": "sns-pwr-01", "sensor_type": "power_meter", "criticality": "critical", "firmware": "3.1.0", "gateway_id": "gw-modbus-01", "zone_id": "zone-assembly-a" },
+    { "id": "sns-pwr-02", "sensor_type": "power_meter", "criticality": "high", "firmware": "3.1.0", "gateway_id": "gw-modbus-01", "zone_id": "zone-assembly-a" },
+    { "id": "sns-pwr-03", "sensor_type": "power_meter", "criticality": "medium", "firmware": "3.1.0", "gateway_id": "gw-modbus-01", "zone_id": "zone-assembly-a" },
+    { "id": "sns-vib-01", "sensor_type": "vibration", "criticality": "critical", "firmware": "4.0.2", "gateway_id": "gw-modbus-01", "zone_id": "zone-assembly-a" },
+    { "id": "sns-vib-02", "sensor_type": "vibration", "criticality": "high", "firmware": "4.0.2", "gateway_id": "gw-modbus-01", "zone_id": "zone-assembly-a" },
+    { "id": "sns-vib-03", "sensor_type": "vibration", "criticality": "high", "firmware": "4.0.2", "gateway_id": "gw-modbus-01", "zone_id": "zone-assembly-a" },
+
+    { "id": "sns-cold-01", "sensor_type": "cryo_temp", "criticality": "critical", "firmware": "2.8.0", "gateway_id": "gw-lte-01", "zone_id": "zone-cold-vault" },
+    { "id": "sns-cold-02", "sensor_type": "cryo_temp", "criticality": "critical", "firmware": "2.8.0", "gateway_id": "gw-lte-01", "zone_id": "zone-cold-vault" },
+    { "id": "sns-cold-03", "sensor_type": "door_contact", "criticality": "high", "firmware": "1.2.4", "gateway_id": "gw-lte-01", "zone_id": "zone-cold-vault" },
+    { "id": "sns-cold-04", "sensor_type": "cryo_temp", "criticality": "high", "firmware": "2.8.0", "gateway_id": "gw-lte-01", "zone_id": "zone-cold-vault" },
+
+    { "id": "sns-temp-05", "sensor_type": "temperature", "criticality": "medium", "firmware": "2.4.1", "gateway_id": "gw-zigbee-01", "zone_id": "zone-packaging" },
+    { "id": "sns-temp-06", "sensor_type": "temperature", "criticality": "medium", "firmware": "2.4.1", "gateway_id": "gw-zigbee-01", "zone_id": "zone-packaging" },
+    { "id": "sns-temp-07", "sensor_type": "temperature", "criticality": "low", "firmware": "2.4.1", "gateway_id": "gw-zigbee-01", "zone_id": "zone-packaging" },
+    { "id": "sns-hum-05", "sensor_type": "humidity", "criticality": "low", "firmware": "1.9.2", "gateway_id": "gw-zigbee-01", "zone_id": "zone-packaging" },
+    { "id": "sns-hum-06", "sensor_type": "humidity", "criticality": "low", "firmware": "1.9.2", "gateway_id": "gw-zigbee-01", "zone_id": "zone-packaging" },
+    { "id": "sns-hum-07", "sensor_type": "humidity", "criticality": "low", "firmware": "1.9.2", "gateway_id": "gw-zigbee-01", "zone_id": "zone-packaging" },
+
+    { "id": "sns-vib-04", "sensor_type": "vibration", "criticality": "critical", "firmware": "4.0.2", "gateway_id": "gw-opcua-01", "zone_id": "zone-packaging" },
+    { "id": "sns-vib-05", "sensor_type": "vibration", "criticality": "high", "firmware": "4.0.2", "gateway_id": "gw-opcua-01", "zone_id": "zone-packaging" },
+    { "id": "sns-vib-06", "sensor_type": "vibration", "criticality": "medium", "firmware": "4.0.2", "gateway_id": "gw-opcua-01", "zone_id": "zone-packaging" },
+    { "id": "sns-pwr-04", "sensor_type": "power_meter", "criticality": "high", "firmware": "3.1.0", "gateway_id": "gw-opcua-01", "zone_id": "zone-packaging" },
+    { "id": "sns-pwr-05", "sensor_type": "power_meter", "criticality": "medium", "firmware": "3.1.0", "gateway_id": "gw-opcua-01", "zone_id": "zone-packaging" },
+    { "id": "sns-pwr-06", "sensor_type": "power_meter", "criticality": "low", "firmware": "3.1.0", "gateway_id": "gw-opcua-01", "zone_id": "zone-packaging" }
+  ]
+}
